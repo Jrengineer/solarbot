@@ -1,0 +1,108 @@
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import cv2
+import depthai as dai
+import numpy as np
+
+latest_map_jpeg = None
+
+
+def create_pipeline():
+    pipeline = dai.Pipeline()
+
+    mono_left = pipeline.create(dai.node.MonoCamera)
+    mono_right = pipeline.create(dai.node.MonoCamera)
+    stereo = pipeline.create(dai.node.StereoDepth)
+    imu = pipeline.create(dai.node.IMU)
+    xout_depth = pipeline.create(dai.node.XLinkOut)
+    xout_depth.setStreamName("depth")
+    xout_imu = pipeline.create(dai.node.XLinkOut)
+    xout_imu.setStreamName("imu")
+
+    mono_left.setBoardSocket(dai.CameraBoardSocket.LEFT)
+    mono_right.setBoardSocket(dai.CameraBoardSocket.RIGHT)
+    for mono in (mono_left, mono_right):
+        mono.setResolution(dai.MonoCameraProperties.SensorResolution.THE_720_P)
+        mono.setFps(30)
+
+    mono_left.out.link(stereo.left)
+    mono_right.out.link(stereo.right)
+    stereo.depth.link(xout_depth.input)
+
+    imu.enableIMUSensor(dai.IMUSensor.ACCELEROMETER_RAW, 500)
+    imu.enableIMUSensor(dai.IMUSensor.GYROSCOPE_RAW, 500)
+    imu.setBatchReportThreshold(1)
+    imu.setMaxBatchReports(10)
+    imu.out.link(xout_imu.input)
+
+    return pipeline
+
+
+def compute_map(depth_frame):
+    # simple threshold-based occupancy map for demo purposes
+    depth_frame = depth_frame.astype(np.float32)
+    depth_frame[depth_frame == 0] = 10_000  # far
+    obstacle = depth_frame < 1_000  # obstacles closer than 1m
+    # resize to smaller map
+    map_img = obstacle.astype(np.uint8) * 255
+    map_img = cv2.resize(map_img, (200, 200), interpolation=cv2.INTER_NEAREST)
+    return map_img
+
+
+def device_loop():
+    global latest_map_jpeg
+    with dai.Device(create_pipeline()) as device:
+        depth_q = device.getOutputQueue(name="depth", maxSize=1, blocking=False)
+        while True:
+            in_depth = depth_q.get()
+            depth_frame = in_depth.getFrame()
+            map_img = compute_map(depth_frame)
+            _, jpeg = cv2.imencode('.jpg', map_img)
+            latest_map_jpeg = jpeg.tobytes()
+
+
+navig_goal = None
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/map' and latest_map_jpeg is not None:
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/jpeg')
+            self.end_headers()
+            self.wfile.write(latest_map_jpeg)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        global navig_goal
+        if self.path == '/goal':
+            length = int(self.headers.get('Content-Length', 0))
+            data = self.rfile.read(length).decode('utf-8')
+            try:
+                x_str, y_str = data.split(',')
+                navig_goal = (float(x_str), float(y_str))
+                print(f"Received goal: {navig_goal}")
+                self.send_response(200)
+                self.end_headers()
+            except Exception:
+                self.send_response(400)
+                self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+def main():
+    threading.Thread(target=device_loop, daemon=True).start()
+    server = HTTPServer(('0.0.0.0', 8000), Handler)
+    print('Map server running on port 8000')
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == '__main__':
+    main()
