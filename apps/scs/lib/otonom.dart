@@ -21,6 +21,7 @@ class _OtonomPageState extends State<OtonomPage> {
   Rect? _personBox; // 0-1 aralığında normalize koordinatlar
   String _status = '';
   Timer? _infoTimer;
+  bool _trackingEnabled = true;
 
   @override
   void initState() {
@@ -30,6 +31,7 @@ class _OtonomPageState extends State<OtonomPage> {
   }
 
   Future<void> _fetchInfo() async {
+    if (!_trackingEnabled) return;
     try {
       final res = await http
           .get(Uri.parse('http://192.168.1.130:8000/person_tracking'))
@@ -58,6 +60,20 @@ class _OtonomPageState extends State<OtonomPage> {
         _status = 'Bilgi alınamadı';
       });
     }
+  }
+
+  Future<void> _setTracking(bool enabled) async {
+    setState(() {
+      _trackingEnabled = enabled;
+      if (!enabled) {
+        _personBox = null;
+        _status = '';
+      }
+    });
+    try {
+      await http.get(Uri.parse(
+          'http://192.168.1.130:8000/person_tracking_mode?enable=${enabled ? 1 : 0}'));
+    } catch (_) {}
   }
 
   @override
@@ -113,6 +129,16 @@ class _OtonomPageState extends State<OtonomPage> {
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Text('Durum: $_status'),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text('İnsan Takibi'),
+              Switch(
+                value: _trackingEnabled,
+                onChanged: _setTracking,
+              ),
+            ],
           ),
           Padding(
             padding: const EdgeInsets.only(bottom: 8.0),
