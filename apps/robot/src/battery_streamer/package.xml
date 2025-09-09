@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>battery_streamer</name>
+  <version>0.1.0</version>
+  <description>Battery telemetry UDP streamer (TCP-controlled) for Jetson.</description>
+  <maintainer email="you@example.com">Kaan</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>python3-serial</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

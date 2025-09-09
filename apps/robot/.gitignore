@@ -1,0 +1,16 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Build and install directories
+build/
+install/
+log/
+
+# Virtual environments
+.venv/
+venv/
+
+# Misc
+*.log
