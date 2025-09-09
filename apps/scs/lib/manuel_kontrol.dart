@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import 'camera_service.dart';
 
 class ManuelKontrol extends StatefulWidget {
   const ManuelKontrol({super.key});
@@ -21,15 +23,6 @@ class _ManuelKontrolState extends State<ManuelKontrol> {
   double _speed = 50;
   Timer? _sendTimer;
 
-  Socket? _tcpSocket;
-  Uint8List? _cameraImageBytes;
-  List<int> _cameraBuffer = [];
-  int _fps = 0;
-  int _frameCounter = 0;
-  int _latencyMs = 0;
-  Timer? _fpsTimer;
-  int _lastFrameTime = 0;
-
   Rect? _leftJoystickArea;
   Rect? _rightJoystickArea;
   Rect? _cameraArea;
@@ -41,61 +34,12 @@ class _ManuelKontrolState extends State<ManuelKontrol> {
   void initState() {
     super.initState();
     _initUdp();
-    _initTcp();
-    _sendTimer = Timer.periodic(const Duration(milliseconds: 10), (_) => _sendData());
-    _fpsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      setState(() {
-        _fps = _frameCounter;
-        _frameCounter = 0;
-      });
-    });
+    _sendTimer =
+        Timer.periodic(const Duration(milliseconds: 10), (_) => _sendData());
   }
 
   void _initUdp() async {
     _udpSocket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-  }
-
-  void _initTcp() async {
-    try {
-      _tcpSocket = await Socket.connect('192.168.1.130', 5000);
-      _tcpSocket!.listen(_onCameraData, onDone: _onCameraDone, onError: _onCameraError);
-    } catch (e) {
-      print('TCP bağlantı hatası: $e');
-    }
-  }
-
-  void _onCameraData(Uint8List data) {
-    _cameraBuffer.addAll(data);
-
-    while (_cameraBuffer.length >= 4) {
-      final byteData = ByteData.sublistView(Uint8List.fromList(_cameraBuffer));
-      final frameLength = byteData.getUint32(0, Endian.big);
-
-      if (_cameraBuffer.length < 4 + frameLength) break;
-
-      final frameData = _cameraBuffer.sublist(4, 4 + frameLength);
-      _cameraBuffer = _cameraBuffer.sublist(4 + frameLength);
-
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final latency = _lastFrameTime == 0 ? 0 : now - _lastFrameTime;
-      _lastFrameTime = now;
-
-      setState(() {
-        _cameraImageBytes = Uint8List.fromList(frameData);
-        _latencyMs = latency;
-        _frameCounter++;
-      });
-    }
-  }
-
-  void _onCameraDone() {
-    print('Kamera bağlantısı kapandı.');
-    _tcpSocket?.destroy();
-  }
-
-  void _onCameraError(error) {
-    print('Kamera bağlantı hatası: $error');
-    _tcpSocket?.destroy();
   }
 
   // Responsive yerleşim (sol/orta/sağ şeritler)
@@ -175,14 +119,13 @@ class _ManuelKontrolState extends State<ManuelKontrol> {
   @override
   void dispose() {
     _udpSocket?.close();
-    _tcpSocket?.destroy();
     _sendTimer?.cancel();
-    _fpsTimer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final cameraService = Provider.of<CameraService>(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Manuel Kontrol')),
       body: LayoutBuilder(
@@ -191,14 +134,14 @@ class _ManuelKontrolState extends State<ManuelKontrol> {
           _calculateAreas(area);
           return Stack(
             children: [
-              if (_cameraImageBytes != null)
+              if (cameraService.imageBytes != null)
                 Positioned(
                   left: _cameraArea!.left,
                   top: _cameraArea!.top,
                   width: _cameraArea!.width,
                   height: _cameraArea!.height,
                   child: Image.memory(
-                    _cameraImageBytes!,
+                    cameraService.imageBytes!,
                     fit: BoxFit.contain,
                     gaplessPlayback: true,
                   ),
@@ -243,9 +186,11 @@ class _ManuelKontrolState extends State<ManuelKontrol> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text('FPS: $_fps', style: const TextStyle(fontSize: 12)),
+                      Text('FPS: ${cameraService.fps}',
+                          style: const TextStyle(fontSize: 12)),
                       const SizedBox(width: 12),
-                      Text('Gecikme: $_latencyMs ms', style: const TextStyle(fontSize: 12)),
+                      Text('Gecikme: ${cameraService.latencyMs} ms',
+                          style: const TextStyle(fontSize: 12)),
                     ],
                   ),
                 ],
