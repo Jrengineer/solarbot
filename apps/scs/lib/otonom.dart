@@ -34,7 +34,7 @@ class _OtonomPageState extends State<OtonomPage> {
   Future<void> _fetchMap() async {
     try {
       final response = await http
-          .get(Uri.parse('http://192.168.1.2:8000/map'))
+          .get(Uri.parse('http://192.168.1.130:8000/map'))
           .timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         if (!mounted) return;
@@ -63,7 +63,7 @@ class _OtonomPageState extends State<OtonomPage> {
     try {
       final socket = await RawDatagramSocket.bind(
           InternetAddress.anyIPv4, 0);
-      socket.send(message, InternetAddress('192.168.1.2'), 8000);
+      socket.send(message, InternetAddress('192.168.1.130'), 8000);
       socket.close();
     } catch (e) {
       // ignore: avoid_print
