@@ -45,7 +45,10 @@ def compute_map(depth_frame):
     difficult to interpret.  This version normalizes the depth image and
     applies OpenCV's ``COLORMAP_TURBO`` to create a more informative map similar
     to commercial robot vacuum applications.  Obstacles closer than 0.5 m are
-    rendered in black, while free space is colorized according to distance.
+    rendered in black, while free space is colorized according to distance.  The
+    robot's footprint (50 cm x 80 cm) is drawn as a white rectangle offset by
+    30 cm behind the camera to provide a bird's-eye reference of the platform
+    itself.
 
     Parameters
     ----------
@@ -78,6 +81,21 @@ def compute_map(depth_frame):
 
     # Resize to smaller map for transmission
     map_img = cv2.resize(color_map, (200, 200), interpolation=cv2.INTER_NEAREST)
+
+    # Draw the robot footprint as a white rectangle.  The map covers ``max_range``
+    # metres in each dimension, so scale metric dimensions accordingly.
+    pixels_per_m = map_img.shape[0] / max_range
+    robot_width_px = int(0.50 * pixels_per_m)
+    robot_length_px = int(0.80 * pixels_per_m)
+    camera_offset_px = int(0.30 * pixels_per_m)
+
+    center_x = map_img.shape[1] // 2
+    center_y = map_img.shape[0] // 2 + camera_offset_px
+    top_left = (center_x - robot_width_px // 2, center_y - robot_length_px // 2)
+    bottom_right = (center_x + robot_width_px // 2,
+                    center_y + robot_length_px // 2)
+    cv2.rectangle(map_img, top_left, bottom_right, (255, 255, 255), 2)
+
     return map_img
 
 
