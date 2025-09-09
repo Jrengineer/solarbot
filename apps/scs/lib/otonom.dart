@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -31,18 +33,23 @@ class _OtonomPageState extends State<OtonomPage> {
 
   Future<void> _fetchMap() async {
     try {
-      final response = await http.get(Uri.parse('http://192.168.1.2:8000/map'));
+      final response = await http
+          .get(Uri.parse('http://192.168.1.2:8000/map'))
+          .timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
+        if (!mounted) return;
         setState(() {
           _mapBytes = response.bodyBytes;
           _mapError = false;
         });
       } else {
+        if (!mounted) return;
         setState(() {
           _mapError = true;
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _mapError = true;
       });
@@ -52,9 +59,12 @@ class _OtonomPageState extends State<OtonomPage> {
   }
 
   Future<void> _sendGoal(Offset pos) async {
-    final body = '${pos.dx},${pos.dy}';
+    final message = utf8.encode('${pos.dx},${pos.dy}');
     try {
-      await http.post(Uri.parse('http://192.168.1.2:8000/goal'), body: body);
+      final socket = await RawDatagramSocket.bind(
+          InternetAddress.anyIPv4, 0);
+      socket.send(message, InternetAddress('192.168.1.2'), 8000);
+      socket.close();
     } catch (e) {
       // ignore: avoid_print
       print('Goal send failed: $e');
@@ -74,7 +84,7 @@ class _OtonomPageState extends State<OtonomPage> {
                 color: Colors.black12,
                 alignment: Alignment.center,
                 child: _mapBytes != null
-                    ? Image.memory(_mapBytes!)
+                    ? InteractiveViewer(child: Image.memory(_mapBytes!))
                     : _mapError
                         ? const Text('Harita yüklenemedi')
                         : const CircularProgressIndicator(),
