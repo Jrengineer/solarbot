@@ -6,6 +6,7 @@ import 'ayarlar.dart';
 import 'kamera_sayfasi.dart';
 import 'status_bar.dart'; // parametresiz kullanılacak
 import 'tek_joystick_spawn.dart';
+import 'otonom.dart';
 
 class AnaSayfa extends StatefulWidget {
   const AnaSayfa({super.key});
@@ -17,13 +18,14 @@ class AnaSayfa extends StatefulWidget {
 class _AnaSayfaState extends State<AnaSayfa> {
   int _selectedIndex = 0;
 
-  // Sıra: Ana Sayfa, Manuel, Tek Joystick, Ayarlar, Kamera
+  // Sıra: Ana Sayfa, Manuel, Tek Joystick, Ayarlar, Kamera, Otonom
   final List<Widget> _pages = const [
     AnaSayfaIcerik(),
     ManuelKontrol(),
     TekJoystickSpawnPage(),
     Ayarlar(),
     KameraSayfasi(),
+    OtonomPage(),
   ];
 
   @override
@@ -80,6 +82,14 @@ class _AnaSayfaState extends State<AnaSayfa> {
               title: const Text('Kamera Görüntüsü'),
               onTap: () {
                 setState(() => _selectedIndex = 4);
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.map),
+              title: const Text('Otonom'),
+              onTap: () {
+                setState(() => _selectedIndex = 5);
                 Navigator.pop(context);
               },
             ),

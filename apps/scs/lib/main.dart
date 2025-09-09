@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'camera_service.dart';
 import 'ana_sayfa.dart';
 import 'tek_joystick_spawn.dart'; // Tek joystick sayfası
+import 'otonom.dart';
 
 void main() {
   runApp(
@@ -28,6 +29,7 @@ class MyApp extends StatelessWidget {
       home: const AnaSayfa(),
       routes: {
         '/tek-joystick-spawn': (context) => const TekJoystickSpawnPage(),
+        '/otonom': (context) => const OtonomPage(),
       },
     );
   }
