@@ -48,8 +48,8 @@ class CameraService extends ChangeNotifier {
       _socket = await Socket.connect(_cameraIp, _cameraPort);
       _connected = true;
       _socket!.listen(_onData,
-          onDone: (_) => _handleDisconnect(),
-          onError: (_) => _handleDisconnect());
+          onDone: _handleDisconnect,
+          onError: (error) => _handleDisconnect());
       notifyListeners();
     } catch (e) {
       _connected = false;
