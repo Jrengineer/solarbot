@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -11,11 +12,21 @@ class OtonomPage extends StatefulWidget {
 
 class _OtonomPageState extends State<OtonomPage> {
   Uint8List? _mapBytes;
+  bool _mapError = false;
+  Timer? _mapTimer;
 
   @override
   void initState() {
     super.initState();
     _fetchMap();
+    _mapTimer =
+        Timer.periodic(const Duration(seconds: 2), (_) => _fetchMap());
+  }
+
+  @override
+  void dispose() {
+    _mapTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _fetchMap() async {
@@ -24,9 +35,17 @@ class _OtonomPageState extends State<OtonomPage> {
       if (response.statusCode == 200) {
         setState(() {
           _mapBytes = response.bodyBytes;
+          _mapError = false;
+        });
+      } else {
+        setState(() {
+          _mapError = true;
         });
       }
     } catch (e) {
+      setState(() {
+        _mapError = true;
+      });
       // ignore: avoid_print
       print('Map fetch failed: $e');
     }
@@ -54,9 +73,11 @@ class _OtonomPageState extends State<OtonomPage> {
               child: Container(
                 color: Colors.black12,
                 alignment: Alignment.center,
-                child: _mapBytes == null
-                    ? const Text('Harita yükleniyor...')
-                    : Image.memory(_mapBytes!),
+                child: _mapBytes != null
+                    ? Image.memory(_mapBytes!)
+                    : _mapError
+                        ? const Text('Harita yüklenemedi')
+                        : const CircularProgressIndicator(),
               ),
             ),
           ),
