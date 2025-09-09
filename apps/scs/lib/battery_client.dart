@@ -98,6 +98,13 @@ class BatteryClient {
       _lastOkWriteAt = DateTime.now();
 
       await _sendUdpPortLine();
+      // Soket kapandığında veya hata olduğunda yeniden bağlan
+      sock.listen(
+        (_) {},
+        onError: (_) => _handleTcpDrop(),
+        onDone: _handleTcpDrop,
+        cancelOnError: true,
+      );
 
       _heartbeatTimer?.cancel();
       _heartbeatTimer = Timer.periodic(const Duration(seconds: 2), (t) async {
@@ -108,9 +115,6 @@ class BatteryClient {
       _watchdogTimer = Timer.periodic(const Duration(seconds: 1), (t) {
         _evaluateConnectionAlive();
       });
-
-      // Jetson kapatırsa…
-      unawaited(_tcpSocket!.done.then((_) => _handleTcpDrop()));
 
       _setConnected(true);
     } catch (_) {
