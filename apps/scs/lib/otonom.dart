@@ -16,6 +16,7 @@ class _OtonomPageState extends State<OtonomPage> {
   Uint8List? _mapBytes;
   bool _mapError = false;
   Timer? _mapTimer;
+  bool _trackingEnabled = false;
 
   @override
   void initState() {
@@ -71,6 +72,19 @@ class _OtonomPageState extends State<OtonomPage> {
     }
   }
 
+  Future<void> _setTracking(bool enable) async {
+    final mode = enable ? 'on' : 'off';
+    try {
+      await http
+          .post(Uri.parse('http://192.168.1.130:8000/person_tracking'),
+              body: mode)
+          .timeout(const Duration(seconds: 2));
+    } catch (e) {
+      // ignore: avoid_print
+      print('Tracking toggle failed: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -94,6 +108,14 @@ class _OtonomPageState extends State<OtonomPage> {
           ElevatedButton(
             onPressed: _fetchMap,
             child: const Text('Haritayı Güncelle'),
+          ),
+          SwitchListTile(
+            title: const Text('İnsan Takibi'),
+            value: _trackingEnabled,
+            onChanged: (val) {
+              setState(() => _trackingEnabled = val);
+              _setTracking(val);
+            },
           ),
         ],
       ),

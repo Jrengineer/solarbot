@@ -16,6 +16,9 @@ robot_pose = [0.0, 0.0, 0.0]
 # Destination the robot should drive towards (x, y) in metres
 navig_goal = None
 
+# Whether the robot should track humans and turn to face them
+person_tracking_enabled = False
+
 
 def create_pipeline():
     pipeline = dai.Pipeline()
@@ -28,6 +31,8 @@ def create_pipeline():
     xout_depth.setStreamName("depth")
     xout_imu = pipeline.create(dai.node.XLinkOut)
     xout_imu.setStreamName("imu")
+    xout_left = pipeline.create(dai.node.XLinkOut)
+    xout_left.setStreamName("left")
 
     mono_left.setBoardSocket(dai.CameraBoardSocket.LEFT)
     mono_right.setBoardSocket(dai.CameraBoardSocket.RIGHT)
@@ -38,6 +43,7 @@ def create_pipeline():
     mono_left.out.link(stereo.left)
     mono_right.out.link(stereo.right)
     stereo.depth.link(xout_depth.input)
+    mono_left.out.link(xout_left.input)
 
     imu.enableIMUSensor(dai.IMUSensor.ACCELEROMETER_RAW, 500)
     imu.enableIMUSensor(dai.IMUSensor.GYROSCOPE_RAW, 500)
@@ -110,15 +116,39 @@ def compute_map(depth_frame):
 
 
 def device_loop():
-    global latest_map_jpeg
+    global latest_map_jpeg, person_tracking_enabled
+    hog = cv2.HOGDescriptor()
+    hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+    cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    dest = ("127.0.0.1", 8888)
     with dai.Device(create_pipeline()) as device:
         depth_q = device.getOutputQueue(name="depth", maxSize=1, blocking=False)
+        left_q = device.getOutputQueue(name="left", maxSize=1, blocking=False)
         while True:
             in_depth = depth_q.get()
+            in_left = left_q.get()
             depth_frame = in_depth.getFrame()
+            left_frame = in_left.getCvFrame()
             map_img = compute_map(depth_frame)
             _, jpeg = cv2.imencode('.jpg', map_img)
             latest_map_jpeg = jpeg.tobytes()
+
+            if person_tracking_enabled:
+                boxes, _ = hog.detectMultiScale(left_frame)
+                turn = 0
+                if len(boxes) > 0:
+                    x, y, w, h = max(boxes, key=lambda b: b[2] * b[3])
+                    center = x + w / 2
+                    err = center - left_frame.shape[1] / 2
+                    turn = int(max(-50, min(50, err / (left_frame.shape[1] / 2) * 50)))
+                pkt = {
+                    "joystick_forward": 0,
+                    "joystick_turn": turn,
+                    "brush1": 0,
+                    "brush2": 0,
+                    "ts": int(time.time() * 1000),
+                }
+                cmd_sock.sendto(json.dumps(pkt).encode(), dest)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -133,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
-        global navig_goal
+        global navig_goal, person_tracking_enabled
         if self.path == '/goal':
             length = int(self.headers.get('Content-Length', 0))
             data = self.rfile.read(length).decode('utf-8')
@@ -146,6 +176,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 self.send_response(400)
                 self.end_headers()
+        elif self.path == '/person_tracking':
+            length = int(self.headers.get('Content-Length', 0))
+            data = self.rfile.read(length).decode('utf-8').strip().lower()
+            person_tracking_enabled = data == 'on'
+            print(f"Person tracking set to {person_tracking_enabled}")
+            self.send_response(200)
+            self.end_headers()
         else:
             self.send_response(404)
             self.end_headers()
