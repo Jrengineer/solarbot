@@ -39,16 +39,13 @@ def create_pipeline():
 
 
 def compute_map(depth_frame):
-    """Generate a colorized map from a depth frame.
+    """Generate a bird's-eye occupancy map from a depth frame.
 
-    The previous implementation produced a binary black/white image which was
-    difficult to interpret.  This version normalizes the depth image and
-    applies OpenCV's ``COLORMAP_TURBO`` to create a more informative map similar
-    to commercial robot vacuum applications.  Obstacles closer than 0.5 m are
-    rendered in black, while free space is colorized according to distance.  The
-    robot's footprint (50 cm x 80 cm) is drawn as a white rectangle offset by
-    30 cm behind the camera to provide a bird's-eye reference of the platform
-    itself.
+    Instead of returning the raw camera view, the depth information is projected
+    onto the ground plane to create a top-down map similar to SLAM outputs.
+    Free space is rendered in white, obstacles in black and unexplored regions
+    in grey.  The robot's footprint (50 cm x 80 cm) is drawn as a white
+    rectangle offset 30 cm behind the camera to provide context.
 
     Parameters
     ----------
@@ -58,42 +55,45 @@ def compute_map(depth_frame):
     Returns
     -------
     numpy.ndarray
-        Colorized map image suitable for JPEG encoding.
+        Top-down occupancy map suitable for JPEG encoding.
     """
 
-    # Ensure ``float32`` for downstream operations and replace missing values
     depth_frame = depth_frame.astype(np.float32)
-    depth_frame[depth_frame == 0] = 10_000  # treat missing depth as far away
-
-    # Convert to metres and clamp far values for better contrast
-    depth_m = depth_frame / 1000.0
     max_range = 4.0  # metres
-    depth_m = np.clip(depth_m, 0.0, max_range)
+    depth_frame[depth_frame == 0] = max_range * 1000  # treat missing depth as far away
 
-    # Normalize to 0-255 and apply a perceptually uniform colour map
-    norm = cv2.normalize(depth_m, None, 0, 255, cv2.NORM_MINMAX)
-    norm = norm.astype(np.uint8)
-    color_map = cv2.applyColorMap(norm, cv2.COLORMAP_TURBO)
+    h, w = depth_frame.shape
+    fx = fy = 610.0  # approximate focal length in pixels for 720p cameras
+    cx, cy = w / 2.0, h / 2.0
 
-    # Highlight obstacles (very close readings) with black pixels
-    obstacle_mask = depth_m < 0.5
-    color_map[obstacle_mask] = (0, 0, 0)
+    map_size = 200
+    map_img = np.full((map_size, map_size), 127, dtype=np.uint8)  # grey for unknown
+    pixels_per_m = map_size / max_range
+    origin = (map_size // 2, map_size - 1)
 
-    # Resize to smaller map for transmission
-    map_img = cv2.resize(color_map, (200, 200), interpolation=cv2.INTER_NEAREST)
+    step = 4  # skip pixels for efficiency
+    for v in range(0, h, step):
+        for u in range(0, w, step):
+            z = depth_frame[v, u] / 1000.0  # convert to metres
+            if z >= max_range:
+                continue
+            x = (u - cx) * z / fx
+            map_x = int(origin[0] + x * pixels_per_m)
+            map_y = int(origin[1] - z * pixels_per_m)
+            if 0 <= map_x < map_size and 0 <= map_y < map_size:
+                cv2.line(map_img, origin, (map_x, map_y), 255, 1)
+                map_img[map_y, map_x] = 0
 
-    # Draw the robot footprint as a white rectangle.  The map covers ``max_range``
-    # metres in each dimension, so scale metric dimensions accordingly.
-    pixels_per_m = map_img.shape[0] / max_range
-    robot_width_px = int(0.50 * pixels_per_m)
-    robot_length_px = int(0.80 * pixels_per_m)
-    camera_offset_px = int(0.30 * pixels_per_m)
+    map_img = cv2.cvtColor(map_img, cv2.COLOR_GRAY2BGR)
 
-    center_x = map_img.shape[1] // 2
-    center_y = map_img.shape[0] // 2 + camera_offset_px
-    top_left = (center_x - robot_width_px // 2, center_y - robot_length_px // 2)
-    bottom_right = (center_x + robot_width_px // 2,
-                    center_y + robot_length_px // 2)
+    robot_width = 0.50
+    robot_length = 0.80
+    camera_offset = 0.30
+    rw_px = int(robot_width * pixels_per_m)
+    rl_px = int(robot_length * pixels_per_m)
+    offset_px = int(camera_offset * pixels_per_m)
+    top_left = (origin[0] - rw_px // 2, origin[1] - offset_px - rl_px)
+    bottom_right = (origin[0] + rw_px // 2, origin[1] - offset_px)
     cv2.rectangle(map_img, top_left, bottom_right, (255, 255, 255), 2)
 
     return map_img
