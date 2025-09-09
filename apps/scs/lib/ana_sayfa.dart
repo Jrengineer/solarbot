@@ -86,7 +86,7 @@ class _AnaSayfaState extends State<AnaSayfa> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.map),
+              leading: const Icon(Icons.person_search),
               title: const Text('Otonom'),
               onTap: () {
                 setState(() => _selectedIndex = 5);

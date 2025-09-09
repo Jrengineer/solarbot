@@ -18,7 +18,6 @@ start_node() {
 start_node "$WS_ROOT/src/battery_streamer/battery_streamer/battery_udp_node.py"
 start_node "$WS_ROOT/src/commcheck/commcheck/commcheck.py"
 start_node "$WS_ROOT/src/oak_streamer/oak_streamer/oak_streamer_node.py"
-start_node "$WS_ROOT/src/oak_streamer/oak_streamer/oak_mapping_node.py"
 start_node "$WS_ROOT/src/plc_comm/plc_comm/udp_listener_node.py"
 
 trap 'echo "Stopping nodes..."; kill ${pids[*]} 2>/dev/null' SIGINT SIGTERM
