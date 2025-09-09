@@ -39,13 +39,45 @@ def create_pipeline():
 
 
 def compute_map(depth_frame):
-    # simple threshold-based occupancy map for demo purposes
+    """Generate a colorized map from a depth frame.
+
+    The previous implementation produced a binary black/white image which was
+    difficult to interpret.  This version normalizes the depth image and
+    applies OpenCV's ``COLORMAP_TURBO`` to create a more informative map similar
+    to commercial robot vacuum applications.  Obstacles closer than 0.5 m are
+    rendered in black, while free space is colorized according to distance.
+
+    Parameters
+    ----------
+    depth_frame: numpy.ndarray
+        Raw depth frame from the OAK device (in millimetres).
+
+    Returns
+    -------
+    numpy.ndarray
+        Colorized map image suitable for JPEG encoding.
+    """
+
+    # Ensure ``float32`` for downstream operations and replace missing values
     depth_frame = depth_frame.astype(np.float32)
-    depth_frame[depth_frame == 0] = 10_000  # far
-    obstacle = depth_frame < 1_000  # obstacles closer than 1m
-    # resize to smaller map
-    map_img = obstacle.astype(np.uint8) * 255
-    map_img = cv2.resize(map_img, (200, 200), interpolation=cv2.INTER_NEAREST)
+    depth_frame[depth_frame == 0] = 10_000  # treat missing depth as far away
+
+    # Convert to metres and clamp far values for better contrast
+    depth_m = depth_frame / 1000.0
+    max_range = 4.0  # metres
+    depth_m = np.clip(depth_m, 0.0, max_range)
+
+    # Normalize to 0-255 and apply a perceptually uniform colour map
+    norm = cv2.normalize(depth_m, None, 0, 255, cv2.NORM_MINMAX)
+    norm = norm.astype(np.uint8)
+    color_map = cv2.applyColorMap(norm, cv2.COLORMAP_TURBO)
+
+    # Highlight obstacles (very close readings) with black pixels
+    obstacle_mask = depth_m < 0.5
+    color_map[obstacle_mask] = (0, 0, 0)
+
+    # Resize to smaller map for transmission
+    map_img = cv2.resize(color_map, (200, 200), interpolation=cv2.INTER_NEAREST)
     return map_img
 
 
