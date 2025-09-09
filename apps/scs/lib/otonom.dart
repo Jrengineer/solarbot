@@ -1,10 +1,15 @@
 import 'dart:async';
-import 'dart:typed_data';
-import 'dart:io';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 
+import 'camera_service.dart';
+
+/// Otonom sayfası artık harita yerine insan takibiyle ilgili kamera
+/// görüntüsünü gösterir. Gelen JSON içinde insanın konumu ve robotun mevcut
+/// durumu bulunur. İnsan tespit edildiğinde kırmızı bir kare ile vurgulanır.
 class OtonomPage extends StatefulWidget {
   const OtonomPage({super.key});
 
@@ -13,109 +18,106 @@ class OtonomPage extends StatefulWidget {
 }
 
 class _OtonomPageState extends State<OtonomPage> {
-  Uint8List? _mapBytes;
-  bool _mapError = false;
-  Timer? _mapTimer;
-  bool _trackingEnabled = false;
+  Rect? _personBox; // 0-1 aralığında normalize koordinatlar
+  String _status = '';
+  Timer? _infoTimer;
 
   @override
   void initState() {
     super.initState();
-    _fetchMap();
-    _mapTimer =
-        Timer.periodic(const Duration(seconds: 2), (_) => _fetchMap());
+    _infoTimer =
+        Timer.periodic(const Duration(milliseconds: 500), (_) => _fetchInfo());
   }
 
-  @override
-  void dispose() {
-    _mapTimer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _fetchMap() async {
+  Future<void> _fetchInfo() async {
     try {
-      final response = await http
-          .get(Uri.parse('http://192.168.1.130:8000/map'))
-          .timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        if (!mounted) return;
+      final res = await http
+          .get(Uri.parse('http://192.168.1.130:8000/person_tracking'))
+          .timeout(const Duration(seconds: 2));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final box = data['box'];
         setState(() {
-          _mapBytes = response.bodyBytes;
-          _mapError = false;
-        });
-      } else {
-        if (!mounted) return;
-        setState(() {
-          _mapError = true;
+          if (box is Map) {
+            _personBox = Rect.fromLTWH(
+              (box['x'] as num).toDouble(),
+              (box['y'] as num).toDouble(),
+              (box['w'] as num).toDouble(),
+              (box['h'] as num).toDouble(),
+            );
+          } else {
+            _personBox = null;
+          }
+          _status = data['status']?.toString() ?? '';
         });
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _mapError = true;
+        _personBox = null;
+        _status = 'Bilgi alınamadı';
       });
-      // ignore: avoid_print
-      print('Map fetch failed: $e');
-    }
-  }
-
-  Future<void> _sendGoal(Offset pos) async {
-    final message = utf8.encode('${pos.dx},${pos.dy}');
-    try {
-      final socket = await RawDatagramSocket.bind(
-          InternetAddress.anyIPv4, 0);
-      socket.send(message, InternetAddress('192.168.1.130'), 8000);
-      socket.close();
-    } catch (e) {
-      // ignore: avoid_print
-      print('Goal send failed: $e');
-    }
-  }
-
-  Future<void> _setTracking(bool enable) async {
-    final mode = enable ? 'on' : 'off';
-    try {
-      await http
-          .post(Uri.parse('http://192.168.1.130:8000/person_tracking'),
-              body: mode)
-          .timeout(const Duration(seconds: 2));
-    } catch (e) {
-      // ignore: avoid_print
-      print('Tracking toggle failed: $e');
     }
   }
 
   @override
+  void dispose() {
+    _infoTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final cameraService = Provider.of<CameraService>(context);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Otonom')),
       body: Column(
         children: [
           Expanded(
-            child: GestureDetector(
-              onTapDown: (details) => _sendGoal(details.localPosition),
-              child: Container(
-                color: Colors.black12,
-                alignment: Alignment.center,
-                child: _mapBytes != null
-                    ? InteractiveViewer(child: Image.memory(_mapBytes!))
-                    : _mapError
-                        ? const Text('Harita yüklenemedi')
-                        : const CircularProgressIndicator(),
-              ),
+            child: Center(
+              child: cameraService.imageBytes != null
+                  ? LayoutBuilder(
+                      builder: (context, constraints) {
+                        final w = constraints.maxWidth;
+                        final h = constraints.maxHeight;
+                        return Stack(
+                          children: [
+                            Positioned.fill(
+                              child: Image.memory(
+                                cameraService.imageBytes!,
+                                gaplessPlayback: true,
+                                fit: BoxFit.contain,
+                              ),
+                            ),
+                            if (_personBox != null)
+                              Positioned(
+                                left: _personBox!.left * w,
+                                top: _personBox!.top * h,
+                                width: _personBox!.width * w,
+                                height: _personBox!.height * h,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                        color: Colors.red, width: 3),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    )
+                  : const CircularProgressIndicator(),
             ),
           ),
-          ElevatedButton(
-            onPressed: _fetchMap,
-            child: const Text('Haritayı Güncelle'),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Text('Durum: $_status'),
           ),
-          SwitchListTile(
-            title: const Text('İnsan Takibi'),
-            value: _trackingEnabled,
-            onChanged: (val) {
-              setState(() => _trackingEnabled = val);
-              _setTracking(val);
-            },
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8.0),
+            child: Text(
+                'FPS: ${cameraService.fps}   Gecikme: ${cameraService.latencyMs} ms'),
           ),
         ],
       ),
