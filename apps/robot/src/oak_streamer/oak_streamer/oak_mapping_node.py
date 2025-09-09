@@ -1,10 +1,20 @@
 import threading
+import socket
+import json
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import cv2
 import depthai as dai
 import numpy as np
+import math
 
 latest_map_jpeg = None
+
+# Robot pose estimate in metres/radians (x, y, yaw)
+robot_pose = [0.0, 0.0, 0.0]
+
+# Destination the robot should drive towards (x, y) in metres
+navig_goal = None
 
 
 def create_pipeline():
@@ -111,9 +121,6 @@ def device_loop():
             latest_map_jpeg = jpeg.tobytes()
 
 
-navig_goal = None
-
-
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/map' and latest_map_jpeg is not None:
@@ -144,8 +151,90 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
 
+def goal_udp_listener(port: int = 8000):
+    """Listen for goal coordinates via UDP.
+
+    Incoming datagrams should contain two comma-separated floats
+    representing the target ``x`` and ``y`` in metres, e.g. ``"1.2,3.4"``.
+    Any malformed packets are ignored.
+    """
+    global navig_goal
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("0.0.0.0", port))
+    while True:
+        data, _ = sock.recvfrom(1024)
+        try:
+            x_str, y_str = data.decode().split(",")
+            navig_goal = (float(x_str), float(y_str))
+            print(f"Received goal via UDP: {navig_goal}")
+        except Exception as exc:
+            print(f"Invalid UDP goal '{data}': {exc}")
+
+
+def navigation_loop():
+    """Continuously drive the robot towards ``navig_goal``.
+
+    A very small proportional controller translates the distance and heading
+    error into joystick commands which are sent over UDP to the existing
+    ``udp_listener_node`` (port 8888).  Odometry is approximated by integrating
+    the commands we send assuming fixed linear and angular speeds.
+    """
+
+    global navig_goal
+    cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    dest = ("127.0.0.1", 8888)
+
+    # Controller constants
+    kp_dist = 50.0  # convert metres to joystick percentage
+    kp_ang = 60.0   # convert radians to joystick percentage
+    max_lin = 0.3   # m/s when joystick_forward=100
+    max_ang = math.radians(90)  # rad/s when joystick_turn=100
+    dt = 0.1
+
+    while True:
+        if navig_goal is not None:
+            dx = navig_goal[0] - robot_pose[0]
+            dy = navig_goal[1] - robot_pose[1]
+            dist = math.hypot(dx, dy)
+            desired_heading = math.atan2(dx, dy)
+            heading_err = (desired_heading - robot_pose[2] + math.pi) % (2 * math.pi) - math.pi
+
+            forward = max(-100, min(100, int(kp_dist * dist)))
+            turn = max(-100, min(100, int(kp_ang * heading_err)))
+
+            pkt = {
+                "joystick_forward": forward,
+                "joystick_turn": turn,
+                "brush1": 0,
+                "brush2": 0,
+                "ts": int(time.time() * 1000),
+            }
+            cmd_sock.sendto(json.dumps(pkt).encode(), dest)
+
+            v = forward / 100.0 * max_lin
+            w = turn / 100.0 * max_ang
+            robot_pose[2] += w * dt
+            robot_pose[0] += v * math.sin(robot_pose[2]) * dt
+            robot_pose[1] += v * math.cos(robot_pose[2]) * dt
+
+            if dist < 0.1:
+                stop_pkt = {
+                    "joystick_forward": 0,
+                    "joystick_turn": 0,
+                    "brush1": 0,
+                    "brush2": 0,
+                    "ts": int(time.time() * 1000),
+                }
+                cmd_sock.sendto(json.dumps(stop_pkt).encode(), dest)
+                navig_goal = None
+
+        time.sleep(dt)
+
+
 def main():
     threading.Thread(target=device_loop, daemon=True).start()
+    threading.Thread(target=goal_udp_listener, daemon=True).start()
+    threading.Thread(target=navigation_loop, daemon=True).start()
     server = HTTPServer(('0.0.0.0', 8000), Handler)
     print('Map server running on port 8000')
     try:
